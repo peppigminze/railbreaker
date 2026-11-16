@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAILBREAKER</title>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<style>
+:root { --cy: #19e6ff; --mg: #ff2bd6; --yl: #ffe02a; --rd: #ff3b3b; --bg: #0b0418; --pn: rgba(14, 6, 30, 0.72); }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); color: #fff;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", Menlo, monospace; text-transform: uppercase; user-select: none; -webkit-user-select: none; }
+canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; transition: filter 0.25s; }
+body.paused canvas#game { filter: blur(7px) brightness(0.55) saturate(0.8); }
+body.paused #hud { display: none; }
+.hidden { display: none !important; }
+
+/* ---------- HUD ---------- */
+#hud { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 0 8px rgba(25, 230, 255, 0.55); }
+#hud.glitch { animation: hudGlitch 0.28s steps(3) 1; }
+@keyframes hudGlitch { 0% { transform: translate(5px, -2px) skewX(3deg); filter: hue-rotate(60deg); text-shadow: -4px 0 var(--rd), 4px 0 var(--cy); } 50% { transform: translate(-4px, 2px) skewX(-2deg); } 100% { transform: none; filter: none; } }
+.panel { position: absolute; background: var(--pn); border: 1px solid rgba(25, 230, 255, 0.35); padding: 10px 16px; backdrop-filter: blur(3px); }
+.panel::before { content: ""; position: absolute; left: -1px; top: -1px; width: 14px; height: 14px; border-left: 2px solid var(--cy); border-top: 2px solid var(--cy); }
+.lbl { font-size: 11px; letter-spacing: 2px; color: var(--cy); width: 44px; display: inline-block; }
+.row { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 14px; }
+.bar { width: 190px; height: 11px; background: rgba(255, 255, 255, 0.1); position: relative; overflow: hidden; }
+.bar > div { height: 100%; width: 100%; background: #fff; box-shadow: 0 0 10px currentColor; transition: width 0.08s linear; }
+.bar.en > div { background: var(--mg); color: var(--mg); }
+.bar.heat > div { background: linear-gradient(90deg, var(--cy), var(--yl) 60%, var(--rd)); background-size: 190px 100%; width: 0; }
+#bl { left: 26px; bottom: 26px; transform: skewY(3deg); transform-origin: left bottom; }
+#hpText, #enText { width: 34px; text-align: right; font-weight: 700; }
+#dashPips { display: flex; gap: 7px; }
+#dashPips i { width: 34px; height: 9px; background: rgba(255, 255, 255, 0.12); transform: skewX(-25deg); }
+#dashPips.c1 i:nth-child(1), #dashPips.c2 i { background: var(--cy); box-shadow: 0 0 10px var(--cy); }
+#br { right: 26px; bottom: 26px; transform: skewY(-3deg); transform-origin: right bottom; display: flex; align-items: center; gap: 8px; }
+#br.over { border-color: var(--rd); animation: blink 0.18s steps(2) infinite; }
+#br.over .lbl { color: var(--rd); }
+@keyframes blink { 50% { opacity: 0.45; } }
+#bc { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); text-align: center; }
+#speedVal { font-size: 68px; font-weight: 800; line-height: 0.9; letter-spacing: -2px; font-style: italic; text-shadow: 0 0 18px currentColor; }
+#bc .unit { font-size: 12px; letter-spacing: 6px; color: var(--cy); margin-top: 4px; }
+#bc.pulse #speedVal { animation: spPulse 0.47s ease-in-out infinite; }
+@keyframes spPulse { 50% { transform: scale(1.12); text-shadow: 0 0 34px currentColor; } }
+#stateTag { font-size: 10px; letter-spacing: 3px; color: var(--yl); height: 12px; margin-top: 3px; }
+#tr { right: 26px; top: 22px; display: flex; align-items: center; gap: 14px; transform: skewY(3deg); transform-origin: right top; }
+#rankWrap { position: relative; width: 84px; height: 84px; }
+#rankWrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+#rankWrap circle { fill: none; stroke-width: 6; }
+#rankWrap circle.bg { stroke: rgba(255, 255, 255, 0.12); }
+#rankRing { stroke: var(--cy); stroke-dasharray: 213.6; stroke-dashoffset: 213.6; transition: stroke-dashoffset 0.12s linear; filter: drop-shadow(0 0 5px var(--cy)); }
+#rank { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 46px; font-weight: 900; font-style: italic; }
+#tr.r1 #rankRing { stroke: #7df; } #tr.r2 #rankRing { stroke: var(--yl); } #tr.r3 #rankRing { stroke: #ff8a2a; } #tr.r4 #rankRing { stroke: var(--mg); }
+#tr.r2 #rank { color: var(--yl); } #tr.r3 #rank { color: #ff8a2a; } #tr.r4 #rank { color: var(--mg); text-shadow: 0 0 20px var(--mg); }
+#tr.od { border-color: var(--mg); animation: odGlow 0.47s ease-in-out infinite; }
+@keyframes odGlow { 50% { box-shadow: 0 0 26px var(--mg); } }
+#scoreVal { font-size: 30px; font-weight: 800; text-align: right; }
+#multVal { font-size: 18px; color: var(--yl); text-align: right; font-weight: 700; }
+#rankTitle { font-size: 11px; letter-spacing: 4px; color: var(--cy); text-align: right; }
+#tc { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 22px; font-size: 14px; letter-spacing: 3px; white-space: nowrap; background: var(--pn); padding: 7px 18px; border-bottom: 2px solid var(--cy); }
+#enemyCount { color: var(--rd); text-shadow: 0 0 8px var(--rd); }
+#bossBar { position: absolute; top: 62px; left: 50%; transform: translateX(-50%); width: 46vw; height: 14px; background: rgba(255, 255, 255, 0.1); border: 1px solid var(--rd); }
+#bossBar span { position: absolute; left: 0; right: 0; top: 16px; text-align: center; font-size: 11px; letter-spacing: 8px; color: var(--rd); }
+#bossFill { height: 100%; background: linear-gradient(90deg, #ff7a1a, var(--rd)); box-shadow: 0 0 14px var(--rd); transition: width 0.15s; }
+#feed { position: absolute; right: 30px; top: 150px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; transform: skewY(3deg); }
+.feedline { font-size: 15px; font-weight: 700; color: var(--yl); opacity: 0; text-shadow: 0 0 8px rgba(255, 224, 42, 0.7); white-space: nowrap; }
+.feedline.minor { font-size: 11px; color: #9fefff; text-shadow: none; }
+#popups { position: absolute; left: 50%; top: 31%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.pop { font-size: 24px; font-weight: 900; font-style: italic; letter-spacing: 4px; opacity: 0; color: var(--cy); white-space: nowrap; }
+.pop.show { animation: popIn 1.5s cubic-bezier(0.2, 1.4, 0.3, 1) forwards; }
+.pop.warn { color: var(--rd); text-shadow: 0 0 12px var(--rd); } .pop.gold { color: var(--yl); text-shadow: 0 0 12px var(--yl); } .pop.mg { color: var(--mg); text-shadow: 0 0 14px var(--mg); }
+@keyframes popIn { 0% { opacity: 0; transform: scale(1.9) skewX(-12deg); } 12% { opacity: 1; transform: scale(1) skewX(-8deg); } 75% { opacity: 1; transform: scale(1) skewX(-8deg); } 100% { opacity: 0; transform: translateY(-18px) scale(0.95) skewX(-8deg); } }
+#banner { position: absolute; left: 0; right: 0; top: 17%; text-align: center; opacity: 0; }
+#banner.show { animation: bannerIn 2.8s ease forwards; }
+#bannerMain { font-size: 54px; font-weight: 900; font-style: italic; letter-spacing: 10px; text-shadow: 0 0 22px var(--cy), 3px 0 var(--mg), -3px 0 var(--cy); }
+#bannerSub { font-size: 15px; letter-spacing: 6px; color: var(--yl); margin-top: 8px; }
+@keyframes bannerIn { 0% { opacity: 0; transform: scaleX(1.6); letter-spacing: 30px; } 10% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-12px); } }
+#hint { position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%) translateY(12px); background: var(--pn); border-left: 3px solid var(--yl); padding: 10px 18px; font-size: 14px; letter-spacing: 1.5px; opacity: 0; transition: opacity 0.3s, transform 0.3s; white-space: nowrap; text-shadow: none; max-width: 94vw; }
+#hint.show { opacity: 1; transform: translateX(-50%); }
+#warn { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); font-size: 26px; font-weight: 900; letter-spacing: 8px; color: #ff9a1a; text-shadow: 0 0 14px #ff9a1a; opacity: 0; }
+#warn.show { opacity: 1; animation: blink 0.25s steps(2) infinite; }
+#crosshair { position: absolute; left: 50%; top: 50%; --gap: 5px; }
+#crosshair .ch { position: absolute; background: #fff; box-shadow: 0 0 5px var(--cy); transition: transform 0.05s; }
+#crosshair .t, #crosshair .b { width: 2px; height: 9px; left: -1px; }
+#crosshair .l, #crosshair .r { height: 2px; width: 9px; top: -1px; }
+#crosshair .t { top: calc(-9px - var(--gap)); } #crosshair .b { top: var(--gap); }
+#crosshair .l { left: calc(-9px - var(--gap)); } #crosshair .r { left: var(--gap); }
+#crosshair .dot { position: absolute; width: 2px; height: 2px; left: -1px; top: -1px; background: var(--cy); }
+#hitmarker { position: absolute; left: 0; top: 0; opacity: 0; }
+#hitmarker i { position: absolute; width: 12px; height: 2px; background: #fff; left: -6px; top: -1px; }
+#hitmarker i:nth-child(1) { transform: rotate(45deg) translateX(13px); } #hitmarker i:nth-child(2) { transform: rotate(135deg) translateX(13px); }
+#hitmarker i:nth-child(3) { transform: rotate(225deg) translateX(13px); } #hitmarker i:nth-child(4) { transform: rotate(315deg) translateX(13px); }
+#hitmarker.hit { animation: hm 0.14s ease-out; } #hitmarker.weak { animation: hm 0.18s ease-out; } #hitmarker.weak i { background: var(--yl); }
+#hitmarker.kill { animation: hmKill 0.32s ease-out; } #hitmarker.kill i { background: var(--rd); width: 18px; height: 3px; left: -9px; box-shadow: 0 0 8px var(--rd); }
+@keyframes hm { 0% { opacity: 1; transform: scale(1.3); } 100% { opacity: 0; transform: scale(0.9); } }
+@keyframes hmKill { 0% { opacity: 1; transform: scale(1.9) rotate(20deg); } 100% { opacity: 0; transform: scale(1.1); } }
+#dmgNums, #indicators { position: absolute; inset: 0; }
+.dmg { position: absolute; left: 0; top: 0; font-size: 17px; font-weight: 800; opacity: 0; color: #fff; text-shadow: 0 0 6px #000; will-change: transform; margin: -10px 0 0 -12px; }
+.dmg.mid { color: var(--cy); } .dmg.big { color: var(--yl); font-size: 21px; } .dmg.huge { color: #ff8a2a; font-size: 26px; } .dmg.weak { color: var(--mg); font-size: 23px; } .dmg.kill { text-decoration: underline; }
+.dirind { position: absolute; left: 50%; top: 50%; width: 120px; height: 16px; opacity: 0; border-top: 5px solid var(--rd); border-radius: 60px 60px 0 0 / 16px 16px 0 0; filter: drop-shadow(0 0 6px var(--rd)); }
+.offind { position: absolute; left: 0; top: 0; width: 0; height: 0; margin: -11px 0 0 -11px; opacity: 0; border-top: 11px solid transparent; border-bottom: 11px solid transparent; border-left: 22px solid var(--rd); filter: drop-shadow(0 0 6px var(--rd)); will-change: transform; }
+#lockNote { position: fixed; left: 50%; top: 58%; transform: translateX(-50%); background: var(--pn); border: 1px solid var(--yl); padding: 10px 20px; font-size: 13px; letter-spacing: 2px; color: var(--yl); pointer-events: none; text-align: center; }
+
+/* ---------- Menüs ---------- */
+#menus { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; overflow-y: auto; }
+body.inmenu #menus { background: radial-gradient(ellipse at center, rgba(11, 4, 24, 0.15), rgba(11, 4, 24, 0.75)); }
+.menu { width: min(620px, 94vw); padding: 26px 30px; text-align: center; }
+.menu.box { max-height: 100vh; overflow-y: auto; }
+.menu.box { background: rgba(12, 5, 28, 0.86); border: 1px solid rgba(25, 230, 255, 0.4); backdrop-filter: blur(6px); }
+.title { position: relative; display: inline-block; font-size: clamp(34px, 7.6vw, 72px); white-space: nowrap; font-weight: 900; font-style: italic; letter-spacing: 4px; color: #fff; text-shadow: 0 0 26px var(--cy); }
+.title::before, .title::after { content: attr(data-text); position: absolute; left: 0; top: 0; }
+.title::before { color: var(--mg); animation: gl1 2.6s infinite steps(1); z-index: -1; }
+.title::after { color: var(--cy); animation: gl2 3.1s infinite steps(1); z-index: -1; }
+@keyframes gl1 { 0%, 100% { transform: translate(-3px, 0); clip-path: inset(0 0 0 0); } 20% { transform: translate(-7px, 2px); clip-path: inset(20% 0 55% 0); } 24% { transform: translate(-3px, 0); clip-path: inset(0 0 0 0); } 60% { transform: translate(9px, -1px); clip-path: inset(62% 0 12% 0); } 63% { transform: translate(-3px, 0); clip-path: inset(0 0 0 0); } }
+@keyframes gl2 { 0%, 100% { transform: translate(3px, 0); clip-path: inset(0 0 0 0); } 35% { transform: translate(8px, 1px); clip-path: inset(40% 0 35% 0); } 38% { transform: translate(3px, 0); clip-path: inset(0 0 0 0); } 80% { transform: translate(-10px, 0); clip-path: inset(8% 0 78% 0); } 83% { transform: translate(3px, 0); clip-path: inset(0 0 0 0); } }
+.sub { font-size: 13px; letter-spacing: 7px; color: var(--cy); margin: 6px 0 30px; }
+h2 { font-size: 26px; font-style: italic; letter-spacing: 6px; margin-bottom: 18px; color: var(--cy); text-shadow: 0 0 12px var(--cy); }
+button { font: inherit; text-transform: uppercase; color: #fff; background: rgba(25, 230, 255, 0.07); border: 1px solid rgba(25, 230, 255, 0.55); padding: 12px 20px; letter-spacing: 4px; cursor: pointer; transition: all 0.12s; pointer-events: auto; }
+button:hover, button:focus-visible { background: var(--cy); color: #05020d; box-shadow: 0 0 22px var(--cy); outline: none; }
+button.on { background: var(--mg); border-color: var(--mg); color: #fff; }
+.btn-big { display: block; width: 100%; margin: 10px 0; font-size: 18px; font-weight: 800; transform: skewX(-8deg); }
+.btn-primary { font-size: 26px; padding: 16px; background: rgba(255, 43, 214, 0.2); border-color: var(--mg); }
+.btn-primary:hover { background: var(--mg); color: #fff; box-shadow: 0 0 30px var(--mg); }
+.seedrow { display: flex; gap: 8px; margin: 10px 0; transform: skewX(-8deg); align-items: stretch; }
+.seedrow span { display: flex; align-items: center; padding: 0 14px; border: 1px solid rgba(25, 230, 255, 0.55); letter-spacing: 4px; font-weight: 800; }
+.seedrow input { flex: 1; min-width: 0; font: inherit; font-size: 18px; text-transform: uppercase; letter-spacing: 5px; text-align: center; background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(25, 230, 255, 0.55); color: var(--yl); padding: 10px; outline: none; user-select: text; -webkit-user-select: text; }
+.seedrow input:focus { border-color: var(--yl); box-shadow: 0 0 14px rgba(255, 224, 42, 0.4); }
+#menuStats { font-size: 11px; letter-spacing: 3px; color: #e3d9ff; margin-top: 22px; text-shadow: 0 0 6px #000, 0 0 3px #000; }
+#menu-main .note { color: #e3d9ff; text-shadow: 0 0 6px #000, 0 0 3px #000; }
+.note { font-size: 11px; letter-spacing: 1.5px; color: #b9a8e6; margin-top: 12px; line-height: 1.6; text-transform: none; }
+.setrow { display: grid; grid-template-columns: 1fr 1.2fr 62px; align-items: center; gap: 12px; margin: 11px 0; font-size: 13px; letter-spacing: 2px; text-align: left; }
+.setrow output { text-align: right; color: var(--yl); }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; background: rgba(255, 255, 255, 0.16); outline: none; cursor: pointer; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 20px; background: var(--cy); box-shadow: 0 0 10px var(--cy); transform: skewX(-12deg); }
+input[type=range]::-moz-range-thumb { width: 14px; height: 20px; background: var(--cy); border: none; border-radius: 0; }
+.seg { display: flex; gap: 6px; grid-column: 2 / 4; } .seg button { flex: 1; padding: 8px 4px; font-size: 12px; letter-spacing: 2px; }
+.bindrow { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 6px 0; font-size: 12px; letter-spacing: 1px; text-align: left; }
+.bindbtn { padding: 6px 12px; font-size: 12px; letter-spacing: 2px; min-width: 170px; }
+.fixed-binds { font-size: 12px; letter-spacing: 1px; text-align: left; color: #d9d0f5; line-height: 1.9; margin: 10px 0; }
+.fixed-binds b { color: var(--cy); display: inline-block; min-width: 200px; }
+.tips { text-align: left; font-size: 11.5px; line-height: 1.7; color: #d9d0f5; text-transform: none; letter-spacing: 0.5px; border-left: 3px solid var(--yl); padding-left: 12px; margin: 14px 0; }
+.tips b { color: var(--yl); }
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 26px; margin: 18px 0; font-size: 13px; letter-spacing: 2px; text-align: left; }
+.stats div { display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255, 255, 255, 0.12); padding: 5px 0; }
+.stats b { color: var(--yl); }
+#ovScore { font-size: 56px; font-weight: 900; font-style: italic; text-shadow: 0 0 22px var(--cy); }
+#ovRankRow { font-size: 16px; letter-spacing: 6px; color: var(--cy); } #ovRank { font-size: 34px; font-weight: 900; color: var(--mg); font-style: italic; }
+#ovRecord { font-size: 22px; font-weight: 900; letter-spacing: 8px; color: var(--yl); margin: 10px 0; animation: rec 0.7s ease-in-out infinite; text-shadow: 0 0 18px var(--yl); }
+@keyframes rec { 0% { transform: scale(1) rotate(-2deg); } 50% { transform: scale(1.14) rotate(2deg); color: #fff; } 100% { transform: scale(1) rotate(-2deg); } }
+#overTitle { color: var(--rd); text-shadow: 0 0 14px var(--rd); }
+.rowbtns { display: flex; gap: 12px; } .rowbtns button { flex: 1; }
+#fatal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 30px; text-align: center; text-transform: none; line-height: 1.7; background: var(--bg); z-index: 99; }
+@media (max-height: 640px) { #speedVal { font-size: 48px; } #bannerMain { font-size: 36px; } }
+@media (prefers-reduced-motion: reduce) { .title::before, .title::after, #ovRecord { animation: none; } }
+</style>
+</head>
+<body class="inmenu">
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="dmgNums"></div>
+  <div id="indicators"></div>
+  <div id="crosshair"><i class="ch t"></i><i class="ch b"></i><i class="ch l"></i><i class="ch r"></i><i class="dot"></i><div id="hitmarker"><i></i><i></i><i></i><i></i></div></div>
+  <div id="bl" class="panel">
+    <div class="row"><span class="lbl">HP</span><div class="bar hp"><div id="hpFill"></div></div><span id="hpText">100</span></div>
+    <div class="row"><span class="lbl">RAIL</span><div class="bar en"><div id="enFill"></div></div><span id="enText">60</span></div>
+    <div class="row"><span class="lbl">DASH</span><div id="dashPips" class="c2"><i></i><i></i></div></div>
+  </div>
+  <div id="bc"><div id="speedVal">0</div><div class="unit">M/S</div><div id="stateTag"></div></div>
+  <div id="br" class="panel"><span class="lbl">HEAT</span><div class="bar heat"><div id="heatFill"></div></div></div>
+  <div id="tr" class="panel">
+    <div id="scoreBox"><div id="scoreVal">0</div><div id="multVal">×1</div><div id="rankTitle">CRUISE</div></div>
+    <div id="rankWrap"><svg viewBox="0 0 80 80"><circle class="bg" cx="40" cy="40" r="34"/><circle id="rankRing" cx="40" cy="40" r="34"/></svg><div id="rank">D</div></div>
+  </div>
+  <div id="tc"><span id="waveNum">GET READY</span><span id="enemyCount"></span><span id="ghostDelta"></span></div>
+  <div id="bossBar" class="hidden"><div id="bossFill"></div><span>WARDEN</span></div>
+  <div id="feed"></div>
+  <div id="popups"></div>
+  <div id="banner"><div id="bannerMain"></div><div id="bannerSub"></div></div>
+  <div id="hint"></div>
+  <div id="warn">⚠ WOLKENMEER – HOCH!</div>
+</div>
+
+<div id="lockNote" class="hidden"></div>
+
+<div id="menus">
+  <section id="menu-main" class="menu">
+    <div class="title" data-text="RAILBREAKER">RAILBREAKER</div>
+    <div class="sub">Bau deine Achterbahn. Kämpf darauf.</div>
+    <button id="btnPlay" class="btn-big btn-primary">Play</button>
+    <div class="seedrow"><span>Seed</span><input id="seedInput" maxlength="12" spellcheck="false" autocomplete="off" aria-label="Seed"><button id="btnSeedRandom" title="Zufälliger Seed">Zufall</button></div>
+    <button id="btnSettings" class="btn-big">Settings</button>
+    <button id="btnControls" class="btn-big">Controls</button>
+    <div id="menuStats"></div>
+    <div class="note">Gleicher Seed = gleiche Stadt. Dein bester Run pro Seed läuft als Ghost mit.</div>
+  </section>
+
+  <section id="menu-settings" class="menu box hidden">
+    <h2>Settings</h2>
+    <div class="setrow"><label for="setSens">Maus-Sensitivität</label><input id="setSens" type="range" min="0.2" max="3" step="0.05"><output id="setSensVal"></output></div>
+    <div class="setrow"><label for="setFov">Sichtfeld (FOV)</label><input id="setFov" type="range" min="70" max="110" step="1"><output id="setFovVal"></output></div>
+    <div class="setrow"><label for="setMaster">Lautstärke Master</label><input id="setMaster" type="range" min="0" max="1" step="0.01"><output id="setMasterVal"></output></div>
+    <div class="setrow"><label for="setMusic">Lautstärke Musik</label><input id="setMusic" type="range" min="0" max="1" step="0.01"><output id="setMusicVal"></output></div>
+    <div class="setrow"><label for="setSfx">Lautstärke SFX</label><input id="setSfx" type="range" min="0" max="1" step="0.01"><output id="setSfxVal"></output></div>
+    <div class="setrow"><label for="setShake">Screenshake</label><input id="setShake" type="range" min="0" max="1.5" step="0.05"><output id="setShakeVal"></output></div>
+    <div class="setrow"><span>Grafikqualität</span><div class="seg" id="setQuality"><button data-q="low">Low</button><button data-q="med">Med</button><button data-q="high">High</button></div></div>
+    <div class="setrow"><span>Motion Blur</span><div class="seg"><button id="setBlur">An</button></div></div>
+    <div class="note">Qualität regelt Render-/Bloom-Auflösung, Partikelanzahl, Blur-Samples, FXAA, Lande-Marker und Skyline-Dichte.</div>
+    <button id="btnSettingsBack" class="btn-big">Zurück</button>
+  </section>
+
+  <section id="menu-controls" class="menu box hidden">
+    <h2>Controls</h2>
+    <div id="bindTable"></div>
+    <div class="fixed-binds">
+      <div><b>Maus</b>Umsehen</div>
+      <div><b>Linksklick</b>Pulse Carbine</div>
+      <div><b>Rechtsklick (halten)</b>Rail-Gun: Rail wächst in Blickrichtung</div>
+      <div><b>W / S beim Grinden</b>Speed-Pumping (im Takt = Bonus)</div>
+      <div><b>A / D beim Grinden</b>Lehnen, seitlicher Absprung</div>
+      <div><b>Esc</b>Pause</div>
+    </div>
+    <div class="tips">
+      <b>Slide-Jump:</b> im Sprint Slide drücken (+4 m/s), sofort springen, Slide gedrückt halten und so landen – die Reibung greift nie.<br>
+      <b>Air-Strafe:</b> über Sprint-Tempo in der Luft nur A oder D halten und die Maus weich mitziehen: Kurven ohne Tempoverlust.<br>
+      <b>Rails:</b> Gefälle beschleunigt. Kurz vor dem Rail-Ende abspringen = Perfect Release (+20 Energie, Zeitlupe, +50 % Schaden).<br>
+      <b>Rail-Gun in der Luft:</b> Rechtsklick halten – die Rail fängt dich sofort. Mit der Maus steuerst du die Kurve.<br>
+      <b>Tastatur:</b> Ctrl+W schliesst in Browsern den Tab. Für Slide im Sprint lieber C nehmen.
+    </div>
+    <div class="rowbtns"><button id="btnResetBinds">Standard</button><button id="btnControlsBack">Zurück</button></div>
+  </section>
+
+  <section id="menu-pause" class="menu box hidden">
+    <h2>Pause</h2>
+    <button id="btnResume" class="btn-big btn-primary">Weiter</button>
+    <button id="btnPauseRestart" class="btn-big">Neustart (gleicher Seed)</button>
+    <button id="btnPauseSettings" class="btn-big">Settings</button>
+    <button id="btnPauseControls" class="btn-big">Controls</button>
+    <button id="btnPauseMenu" class="btn-big">Hauptmenü</button>
+  </section>
+
+  <section id="menu-over" class="menu box hidden">
+    <h2 id="overTitle">Signal verloren</h2>
+    <div id="ovRecord" class="hidden">★ New Record ★</div>
+    <div id="ovScore">0</div>
+    <div id="ovRankRow">Rang <span id="ovRank">D</span></div>
+    <div class="stats">
+      <div>Höchsttempo <b id="ovSpeed"></b></div><div>Kills <b id="ovKills"></b></div>
+      <div>Grind-Distanz <b id="ovGrind"></b></div><div>Längste Combo <b id="ovCombo"></b></div>
+      <div>Welle <b id="ovWave"></b></div><div>Zeit <b id="ovTime"></b></div>
+    </div>
+    <div class="note" id="ovSeed"></div>
+    <div class="rowbtns" style="margin-top:16px"><button id="btnRetry" class="btn-primary">Retry</button><button id="btnOverMenu">Menu</button></div>
+  </section>
+</div>
+
+<script type="module" src="js/game.js"></script>
+<script>
+// Fallback-Hinweis, falls Module nicht laden (z. B. Datei per file:// geöffnet)
+window.addEventListener('load', function () {
+  setTimeout(function () {
+    if (window.__railbreakerBooted) return;
+    var d = document.createElement('div'); d.id = 'fatal';
+    d.innerHTML = '<div><b style="color:#19e6ff;font-size:20px">RAILBREAKER konnte nicht starten.</b><br><br>' +
+      'Die Mehrdatei-Version braucht einen lokalen Webserver (ES-Module laden nicht über file://) und Internet für Three.js.<br>' +
+      'Im Projektordner: <code>python3 -m http.server 8080</code> und dann <code>http://localhost:8080</code> öffnen – oder die Datei <code>railbreaker-standalone.html</code> per Doppelklick starten.</div>';
+    document.body.appendChild(d);
+  }, 6000);
+});
+</script>
+</body>
+</html>
