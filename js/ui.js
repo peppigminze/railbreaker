@@ -414,7 +414,7 @@ export class UI {
   // Tempo-Verlauf des Runs: Farbe nach Tempo, Overdrive-Phasen, Speed-Bonus-Schwelle, Ø-Linie, Top-Marker, Vergleich mit dem Rekord-Run
   drawGraph(r) {
     const cv = $('ovGraph'), dpr = Math.min(2, window.devicePixelRatio || 1);
-    const cw = cv.clientWidth || 760, ch = 196;
+    const cw = cv.clientWidth || 760, ch = 190;
     cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
     const c = cv.getContext('2d');
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
