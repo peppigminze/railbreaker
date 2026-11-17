@@ -155,7 +155,7 @@ class Game {
     else { this.ui.lockNote('Pointer Lock ist hier blockiert – Maus läuft ohne Fang. Am besten in einem eigenen Tab öffnen.'); setTimeout(() => this.ui.lockNote(null), 6000); }
   }
   onEscape() {
-    const sub = !document.getElementById('menu-settings').classList.contains('hidden') || !document.getElementById('menu-controls').classList.contains('hidden');
+    const sub = ['settings', 'controls', 'scores'].some((m) => !document.getElementById('menu-' + m).classList.contains('hidden'));
     if (sub) { this.ui.showMenu(this.ui.returnTo || 'main'); return; }
     if (this.state === GS.PLAYING) this.pause();
     else if (this.state === GS.PAUSED) this.resume();
@@ -229,19 +229,23 @@ class Game {
     if (on) { this.ui.popup('OVERDRIVE', 'mg'); this.audio.play('overdrive'); this.cam.fovKick(8); this.cam.addTrauma(0.3); }
     else this.audio.play('overdriveEnd');
   }
+  onHighscoreBeaten(old) {
+    this.ui.popup('HIGHSCORE GEBROCHEN', 'gold'); this.audio.play('waveClear');
+    this.cam.fovKick(5);
+  }
   onRankUp(r) { if (r < 4) this.ui.popup(CONFIG.flow.names[r] + ' – ' + CONFIG.flow.titles[r], 'gold'); }
 
   showGameOver() {
     this.state = GS.GAMEOVER;
     const s = this.score;
     const hadGhostScore = s.ghost ? s.ghost.score : -1;
-    const newRecord = s.finalize(this.enemies.wave);
+    const res = s.finalize(this.enemies.wave);
     this.input.exitLock();
     this.ui.showHud(false);
-    this.ui.gameOver({
-      score: s.score, rank: s.bestRank, topSpeed: s.topSpeed, kills: s.kills, grind: s.grindDist, combo: s.longestCombo,
-      wave: this.enemies.wave, time: s.runTime, seed: this.seedStr, newRecord, reason: this.deathReason, ghost: s.score > hadGhostScore && s.recN > 60,
-    });
+    this.ui.gameOver(Object.assign(res, {
+      reason: this.deathReason, time: s.runTime, topSpeed: s.topSpeed, avgSpeed: s.avgSpeed, dist: s.dist, fastTime: s.fastTime,
+      ghost: s.score > hadGhostScore && s.recN > 60,
+    }));
   }
 
   // Kontextuelles Tutorial im ersten Run (T überspringt)

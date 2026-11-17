@@ -31,6 +31,10 @@ Die Standalone-Datei ist ein Bündel der Dateien in `js/` (erzeugt mit `esbuild 
 
 Alle Tastatur-Belegungen lassen sich unter CONTROLS ändern.
 
+## Highscore-Jagd
+
+Punkte und Tempo sind die Hauptziele. Der Game-Over-Screen zeigt: Punkte mit Abstand zum Highscore, Note (D bis S), Tempo-Verlauf als Graph (inkl. Overdrive-Phasen und gestricheltem Rekord-Run), Top-Tempo, Ø-Tempo, Anteil der Zeit über 30 m/s, Distanz, Punkte pro Minute sowie die Top-10-Bestenliste. Verbesserte Bestwerte sind mit ★ markiert. Im HUD läuft die Strecke zum Rekord live mit (Balken unter dem Score, wird gelb, sobald er fällt), dazu Ø- und Top-Tempo unter dem Tacho. Alles liegt im localStorage (`high`, `board`, `bestCurve`). Die Noten-Schwellen stehen in `score.grades` in `js/config.js`.
+
 ## Speed-Techniken
 
 - **Slide-Jump-Kette:** Im Sprint Slide drücken (+4 m/s), sofort springen, Slide gedrückt halten und so landen. Am Boden greift dann nie die normale Reibung. Der Boost kommt einmal pro Sekunde, das Tempo pendelt sich bei gut 40 m/s ein.
@@ -76,7 +80,7 @@ Alle Tastatur-Belegungen lassen sich unter CONTROLS ändern.
 | `world.js` | Chunk-Generierung mit Critical Path, Hash-Grid, Capsule-Kollision, Raycasts |
 | `vfx.js` | Partikel, Instanz-Batches, Himmel/Wolkenmeer, Post-Processing |
 | `audio.js` | Lookahead-Scheduler, Synthwave-Track, Beat-Clock, SFX |
-| `score.js` | Flow, Combos, Highscore, Ghost-Aufzeichnung und -Wiedergabe |
+| `score.js` | Flow, Combos, Highscore, Top-10-Liste, Tempo-Statistik, Ghost-Aufzeichnung und -Wiedergabe |
 | `ui.js` | HUD, Popups, Menüs, Settings |
 
 ## Bekannte Abweichungen von der Spezifikation

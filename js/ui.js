@@ -4,6 +4,13 @@ import { CONFIG, STATE, STATE_NAMES, DEFAULT_SETTINGS } from './config.js';
 import { clamp, fmtInt, fmtTime, Store, randomSeedString } from './util.js';
 
 const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+// Tempo-Farbe: Weiss -> Cyan -> Magenta (HUD-Tacho und Tempo-Graph)
+const speedColor = (sp) => {
+  const t1 = clamp(sp / 22, 0, 1), t2 = clamp((sp - 22) / 18, 0, 1);
+  return `rgb(${Math.round(255 - 230 * t1 + 230 * t2)},${Math.round(255 - 25 * t1 - 187 * t2)},${Math.round(255 - 41 * t2)})`;
+};
+const REDUCED = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion();
 const ACTION_LABELS = {
   forward: 'Vorwärts', back: 'Rückwärts', left: 'Links', right: 'Rechts', jump: 'Springen / Doppelsprung / Wall-Jump / Rail-Absprung',
@@ -36,6 +43,8 @@ export class UI {
     click('btnSeedRandom', () => { $('seedInput').value = randomSeedString(); });
     click('btnSettings', () => this.showMenu('settings'));
     click('btnControls', () => this.showMenu('controls'));
+    click('btnScores', () => this.showMenu('scores'));
+    click('btnScoresBack', () => this.showMenu('main'));
     click('btnSettingsBack', () => this.showMenu(this.returnTo || 'main'));
     click('btnControlsBack', () => this.showMenu(this.returnTo || 'main'));
     click('btnResume', () => g.resume());
@@ -102,17 +111,75 @@ export class UI {
     }
   }
 
+  // Kachel-Reihe (Rekorde): items = [{ k, v, unit, sub, pb }]
+  tilesInto(parent, items) {
+    parent.textContent = '';
+    for (const it of items) {
+      const t = el('div', 'tile' + (it.pb ? ' pb' : ''));
+      t.appendChild(el('span', 'k', it.k));
+      const b = el('b', null, it.v);
+      if (it.unit) { b.appendChild(document.createTextNode(' ')); b.appendChild(el('i', null, it.unit)); }
+      t.appendChild(b); t.appendChild(el('small', null, it.sub || ''));
+      parent.appendChild(t);
+    }
+  }
+
+  // Bestenliste: board = Top-10-Runs, cur = der gerade beendete Run (wird hervorgehoben)
+  boardInto(parent, board, cur, limit) {
+    const g = this.game;
+    parent.textContent = '';
+    const head = el('div', 'brow h');
+    for (const h of ['#', 'PUNKTE', 'TOP M/S', 'Ø M/S', 'WELLE', 'ZEIT', 'SEED']) head.appendChild(el('span', null, h));
+    parent.appendChild(head);
+    if (!board.length) { parent.appendChild(el('div', 'brow empty', 'NOCH KEINE RUNS')); return; }
+    board.slice(0, limit || 10).forEach((r, i) => {
+      const row = el('div', 'brow' + (r === cur ? ' cur' : ''));
+      row.appendChild(el('span', 'pl', '' + (i + 1)));
+      const sc = el('span', 'sc', fmtInt(r.score));
+      sc.appendChild(el('em', 'g' + g.score.grade(r.score), CONFIG.flow.names[g.score.grade(r.score)]));
+      row.appendChild(sc);
+      row.appendChild(el('span', null, r.top.toFixed(1)));
+      row.appendChild(el('span', null, r.avg.toFixed(1)));
+      row.appendChild(el('span', null, 'W' + r.wave));
+      row.appendChild(el('span', null, fmtTime(r.time)));
+      row.appendChild(el('span', 'sd', r.seed || ''));
+      parent.appendChild(row);
+    });
+  }
+
   updateMenuStats() {
-    const h = this.game.score.high;
-    $('menuStats').textContent = h.score > 0 ? `HIGHSCORE ${fmtInt(h.score)}  //  TOP-SPEED ${h.speed.toFixed(1)} M/S  //  BESTE WELLE ${h.wave}` : 'NOCH KEIN RUN – ZEIT, DAS ZU ÄNDERN';
+    const sc = this.game.score, h = sc.high;
+    const ms = $('menuStats');
+    if (h.score > 0) {
+      this.tilesInto(ms, [
+        { k: 'Highscore', v: fmtInt(h.score) },
+        { k: 'Top-Tempo', v: h.speed.toFixed(1), unit: 'M/S' },
+        { k: 'Ø-Tempo', v: h.avg.toFixed(1), unit: 'M/S' },
+        { k: 'Beste Welle', v: '' + h.wave },
+      ]);
+    } else { ms.textContent = ''; ms.appendChild(el('div', 'empty', 'NOCH KEIN RUN – ZEIT, DAS ZU ÄNDERN')); }
+    // Highscore-Menü
+    this.tilesInto($('scoreRecords'), [
+      { k: 'Highscore', v: fmtInt(h.score) }, { k: 'Top-Tempo', v: h.speed.toFixed(1), unit: 'M/S' },
+      { k: 'Bestes Ø-Tempo', v: h.avg.toFixed(1), unit: 'M/S' }, { k: 'Speed-Anteil', v: h.fast + '%', sub: 'ÜBER ' + CONFIG.score.speedBonusMin + ' M/S' },
+      { k: 'Beste Welle', v: '' + h.wave }, { k: 'Meiste Kills', v: '' + h.kills },
+      { k: 'Längste Combo', v: '×' + h.combo }, { k: 'Grind-Distanz', v: fmtInt(h.grind), unit: 'M' },
+    ]);
+    this.boardInto($('scoreBoard'), sc.board, null, 10);
+  }
+
+  updatePauseStats() {
+    const sc = this.game.score, best = Math.max(sc.high.score, sc.score);
+    $('pauseStats').textContent = `PUNKTE ${fmtInt(sc.score)}  //  BEST ${fmtInt(best)}\nØ-TEMPO ${sc.avgSpeed.toFixed(1)}  //  TOP ${sc.topSpeed.toFixed(1)} M/S`;
   }
 
   showMenu(name) {
-    for (const m of ['main', 'settings', 'controls', 'pause', 'over']) $('menu-' + m).classList.toggle('hidden', m !== name);
+    for (const m of ['main', 'settings', 'controls', 'scores', 'pause', 'over']) $('menu-' + m).classList.toggle('hidden', m !== name);
     $('menus').classList.toggle('hidden', !name);
     if (name === 'main' || name === 'pause') this.returnTo = name;
+    if (name === 'pause') this.updatePauseStats();
     document.body.classList.toggle('paused', name === 'pause' || (this.game.paused && (name === 'settings' || name === 'controls')));
-    document.body.classList.toggle('inmenu', name === 'main' || (!this.game.paused && (name === 'settings' || name === 'controls')));
+    document.body.classList.toggle('inmenu', name === 'main' || name === 'scores' || (!this.game.paused && (name === 'settings' || name === 'controls')));
   }
   showHud(on) { this.hud.classList.toggle('hidden', !on); }
   lockNote(text) { const el = $('lockNote'); el.textContent = text || ''; el.classList.toggle('hidden', !text); }
@@ -194,10 +261,11 @@ export class UI {
     // Speedometer: Weiss -> Cyan -> Magenta, pulsiert ab 35 m/s
     const sp = pl.speed, si = Math.round(sp);
     this.set('speedVal', 'text', '' + si);
-    const t1 = clamp(sp / 22, 0, 1), t2 = clamp((sp - 22) / 18, 0, 1);
-    const r = Math.round(255 - 230 * t1 + 230 * t2), gg = Math.round(255 - 25 * t1 - 187 * t2), b = Math.round(255 - 41 * t2);
-    this.set('speedVal', 'color', `rgb(${r},${gg},${b})`);
+    this.set('speedVal', 'color', speedColor(sp));
     this.set('bc', 'class', sp >= 35 ? 'pulse' : '');
+    // Tempo-Zeile: Ø und Top dieses Runs, gelb sobald der Tempo-Rekord fällt
+    this.set('tempoLine', 'text', `Ø ${sc.avgSpeed.toFixed(1)}  ·  TOP ${sc.topSpeed.toFixed(1)}`);
+    this.set('tempoLine', 'class', sc.high.speed > 0 && sc.topSpeed > sc.high.speed ? 'rec' : '');
     this.set('stateTag', 'text', pl.speed > CONFIG.player.speedArmorSpeed ? 'SPEED-ARMOR' : '');
     // Fadenkreuz weitet sich mit der Hitze
     const gap = Math.round(5 + wp.heat * 12 + Math.min(6, wp.kick * 120));
@@ -211,6 +279,11 @@ export class UI {
     const off = Math.round(213.6 * (1 - clamp(frac, 0, 1)));
     this.set('rankRing', 'strokeDashoffset', '' + off);
     this.set('tr', 'class', 'panel r' + sc.rank + (sc.overdrive ? ' od' : ''));
+    // Highscore-Jagd: Fortschritt zum Rekord, nach dem Überholen live der neue Wert
+    const hs = sc.high.score;
+    if (hs <= 0) { this.set('bestLbl', 'text', 'BEST'); this.set('bestVal', 'text', '–'); this.set('bestFill', 'width', '0%'); this.set('bestLine', 'class', ''); }
+    else if (sc.score > hs) { this.set('bestLbl', 'text', 'REKORD'); this.set('bestVal', 'text', fmtInt(sc.score)); this.set('bestFill', 'width', '100%'); this.set('bestLine', 'class', 'beat'); }
+    else { this.set('bestLbl', 'text', 'BEST'); this.set('bestVal', 'text', fmtInt(hs)); this.set('bestFill', 'width', Math.round(sc.score / hs * 100) + '%'); this.set('bestLine', 'class', ''); }
     // Welle, Gegner, Ghost-Delta
     const en = g.enemies;
     this.set('waveNum', 'text', en.wave > 0 ? 'WAVE ' + en.wave : 'GET READY');
@@ -276,19 +349,132 @@ export class UI {
     for (let i = k; i < this.inds.length; i++) if (this.inds[i].used) { this.inds[i].used = false; this.inds[i].el.style.opacity = 0; }
   }
 
-  gameOver(stats) {
-    $('overTitle').textContent = stats.reason === 'fall' ? 'INS WOLKENMEER GESTÜRZT' : 'SIGNAL VERLOREN';
-    $('ovScore').textContent = fmtInt(stats.score);
-    $('ovRank').textContent = CONFIG.flow.names[stats.rank];
-    $('ovSpeed').textContent = stats.topSpeed.toFixed(1) + ' M/S';
-    $('ovKills').textContent = stats.kills;
-    $('ovGrind').textContent = fmtInt(stats.grind) + ' M';
-    $('ovCombo').textContent = '×' + stats.combo;
-    $('ovWave').textContent = stats.wave;
-    $('ovTime').textContent = fmtTime(stats.time);
-    $('ovSeed').textContent = 'SEED ' + stats.seed + (stats.ghost ? '  //  GHOST GESPEICHERT' : '');
-    $('ovRecord').classList.toggle('hidden', !stats.newRecord);
+  gameOver(r) {
+    const run = r.run, prev = r.prev, pb = r.pb, names = CONFIG.flow.names;
+    $('overTitle').textContent = r.reason === 'fall' ? 'INS WOLKENMEER GESTÜRZT' : 'SIGNAL VERLOREN';
+    $('ovRecord').classList.toggle('hidden', !r.newRecord);
+    // Punkte: hochzählen, Fortschrittsbalken zum bisherigen Highscore
+    this.countUp($('ovScore'), run.score, 1100);
+    const scale = Math.max(run.score, prev.score, 1);
+    const bar = $('ovBestBar'), fill = $('ovBestFill'), mark = $('ovBestMark');
+    bar.classList.toggle('rec', r.newRecord);
+    mark.style.display = prev.score > 0 ? '' : 'none'; mark.style.left = (prev.score / scale * 100).toFixed(1) + '%';
+    fill.style.width = '0%'; void fill.offsetWidth; fill.style.width = (run.score / scale * 100).toFixed(1) + '%';
+    const dl = $('ovDelta');
+    if (!r.newRecord) { dl.className = 'down'; dl.textContent = `NOCH ${fmtInt(prev.score - run.score)} BIS ZUM HIGHSCORE`; }
+    else if (prev.score > 0) { dl.className = 'up'; dl.textContent = `+${fmtInt(run.score - prev.score)} ÜBER DEM ALTEN HIGHSCORE`; }
+    else { dl.className = 'up'; dl.textContent = 'ERSTER HIGHSCORE GESETZT'; }
+    $('ovPlace').textContent = r.place >= 0 ? `PLATZ ${r.place + 1} IN DEN TOP 10` : run.score > 0 ? 'KNAPP DANEBEN – NICHT IN DEN TOP 10' : '';
+    $('ovRank').textContent = names[r.grade]; $('ovRank').className = 'g' + r.grade;
+    $('ovRankName').textContent = CONFIG.flow.titles[r.grade];
+
+    // Kacheln: Wert, Bestwert-Markierung mit Verbesserung bzw. bisheriger Rekord
+    const tile = (id, text, unit, isPb, prevVal, fmtPrev, delta) => {
+      const t = $(id), b = t.querySelector('b'), sm = t.querySelector('small');
+      b.textContent = text;
+      if (unit) { b.appendChild(document.createTextNode(' ')); b.appendChild(el('i', null, unit)); }
+      const fresh = isPb && prevVal > 0;
+      t.classList.toggle('pb', fresh);
+      sm.textContent = fresh ? '★ BESTWERT' + (delta ? '  ' + delta : '') : prevVal > 0 ? 'BEST ' + fmtPrev(prevVal) : '';
+    };
+    const f1 = (v) => v.toFixed(1), fi = (v) => fmtInt(v);
+    tile('tlTop', f1(run.top), 'M/S', pb.speed, prev.speed, f1, '+' + f1(run.top - prev.speed));
+    tile('tlAvg', f1(run.avg), 'M/S', pb.avg, prev.avg, f1, '+' + f1(run.avg - prev.avg));
+    $('tlFast').querySelector('.k').textContent = 'Über ' + CONFIG.score.speedBonusMin + ' M/S';
+    tile('tlFast', run.fast + '%', '', pb.fast, prev.fast, (v) => v + '%', '+' + (run.fast - prev.fast) + '%');
+    const dist = r.dist, perMin = r.time > 0 ? run.score / r.time * 60 : 0;
+    tile('tlDist', dist < 1000 ? fi(dist) : (dist / 1000).toFixed(2), dist < 1000 ? 'M' : 'KM', false, 0, fi);
+    $('tlDist').querySelector('small').textContent = fi(perMin) + ' PKT/MIN';
+    tile('tlKills', '' + run.kills, '', pb.kills, prev.kills, fi, '+' + (run.kills - prev.kills));
+    tile('tlCombo', '×' + run.combo, '', pb.combo, prev.combo, (v) => '×' + v, '+' + (run.combo - prev.combo));
+    tile('tlGrind', fi(run.grind), 'M', pb.grind, prev.grind, fi, '+' + fi(run.grind - prev.grind));
+    tile('tlWave', '' + run.wave, '', pb.wave, prev.wave, fi, '+' + (run.wave - prev.wave));
+    $('ovFlow').textContent = names[run.rank];
+    $('ovTime').textContent = fmtTime(r.time) + ' S';
+    this.boardInto($('ovBoard'), r.board, run, 5);
+    $('ovSeed').textContent = 'SEED ' + run.seed + (r.ghost ? '  //  GHOST GESPEICHERT' : '');
     this.showMenu('over');
+    this.drawGraph(r);
     this.updateMenuStats();
+  }
+
+  countUp(node, to, ms) {
+    cancelAnimationFrame(this._cu);
+    if (REDUCED() || to <= 0) { node.textContent = fmtInt(to); return; }
+    const t0 = performance.now();
+    const step = (now) => {
+      const f = clamp((now - t0) / ms, 0, 1);
+      node.textContent = fmtInt(to * (1 - Math.pow(1 - f, 3)));
+      if (f < 1) this._cu = requestAnimationFrame(step);
+    };
+    node.textContent = '0';
+    this._cu = requestAnimationFrame(step);
+  }
+
+  // Tempo-Verlauf des Runs: Farbe nach Tempo, Overdrive-Phasen, Speed-Bonus-Schwelle, Ø-Linie, Top-Marker, Vergleich mit dem Rekord-Run
+  drawGraph(r) {
+    const cv = $('ovGraph'), dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cw = cv.clientWidth || 760, ch = 196;
+    cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr);
+    const c = cv.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, cw, ch);
+    c.font = '10px ui-monospace, "SF Mono", Consolas, monospace'; c.textBaseline = 'middle';
+    const { v, od, dt } = r.curve, n = v.length;
+    if (n < 3) { c.fillStyle = '#8f7fbf'; c.textAlign = 'center'; c.fillText('ZU KURZ FÜR EINEN TEMPO-VERLAUF', cw / 2, ch / 2); return; }
+    const L = 34, R = 10, T = 12, B = 40, w = cw - L - R, h = ch - T - B, dur = n * dt;
+    const vmax = Math.ceil(Math.max(40, r.topSpeed + 4) / 10) * 10;
+    const X = (t) => L + t / dur * w, Y = (s) => T + h - s / vmax * h;
+    const bonus = CONFIG.score.speedBonusMin;
+    // Raster + Zeitachse
+    c.lineWidth = 1; c.textAlign = 'right';
+    for (let s = 0; s <= vmax; s += 10) {
+      c.strokeStyle = 'rgba(255,255,255,0.08)'; c.beginPath(); c.moveTo(L, Y(s) + 0.5); c.lineTo(L + w, Y(s) + 0.5); c.stroke();
+      c.fillStyle = '#8f7fbf'; c.fillText('' + s, L - 6, Y(s));
+    }
+    const steps = [5, 10, 15, 30, 60, 120, 300, 600];
+    const stp = steps.find((q) => dur / q <= 8) || 600;
+    c.textAlign = 'center'; c.fillStyle = '#8f7fbf';
+    for (let t = 0; t <= dur; t += stp) c.fillText(t < 60 ? t + 'S' : Math.floor(t / 60) + ':' + ('0' + (t % 60)).slice(-2), X(t), ch - B + 12);
+    // Overdrive-Phasen
+    c.fillStyle = 'rgba(255,43,214,0.16)';
+    for (let i = 0; i < n; i++) if (od[i]) c.fillRect(X(i * dt), T, X((i + 1) * dt) - X(i * dt) + 0.6, h);
+    // Speed-Bonus-Schwelle
+    c.setLineDash([5, 4]); c.strokeStyle = 'rgba(255,224,42,0.55)'; c.beginPath(); c.moveTo(L, Y(bonus) + 0.5); c.lineTo(L + w, Y(bonus) + 0.5); c.stroke(); c.setLineDash([]);
+    c.textAlign = 'left'; c.fillStyle = 'rgba(255,224,42,0.8)'; c.fillText('SPEED-BONUS', L + 4, Y(bonus) - 7);
+    // Fläche unter der Kurve
+    const gr = c.createLinearGradient(0, T, 0, T + h); gr.addColorStop(0, 'rgba(25,230,255,0.38)'); gr.addColorStop(1, 'rgba(25,230,255,0)');
+    c.fillStyle = gr; c.beginPath(); c.moveTo(X(0.5 * dt), Y(0));
+    for (let i = 0; i < n; i++) c.lineTo(X((i + 0.5) * dt), Y(v[i]));
+    c.lineTo(X((n - 0.5) * dt), Y(0)); c.closePath(); c.fill();
+    // Rekord-Run als gestrichelte Vergleichslinie
+    if (r.compare && r.compare.v && r.compare.v.length > 2) {
+      const cp = r.compare, st = cp.step;
+      c.setLineDash([4, 4]); c.strokeStyle = 'rgba(255,224,42,0.85)'; c.lineWidth = 1.5; c.beginPath();
+      let started = false;
+      for (let i = 0; i < cp.v.length; i++) { const t = (i + 0.5) * st; if (t > dur) break; const x = X(t), y = Y(cp.v[i]); if (!started) { c.moveTo(x, y); started = true; } else c.lineTo(x, y); }
+      c.stroke(); c.setLineDash([]);
+    }
+    // Tempo-Linie, segmentweise nach Tempo gefärbt
+    c.lineWidth = 2; c.lineJoin = 'round'; c.lineCap = 'round';
+    let top = 0;
+    for (let i = 1; i < n; i++) {
+      c.strokeStyle = speedColor((v[i - 1] + v[i]) / 2);
+      c.beginPath(); c.moveTo(X((i - 0.5) * dt), Y(v[i - 1])); c.lineTo(X((i + 0.5) * dt), Y(v[i])); c.stroke();
+      if (v[i] > v[top]) top = i;
+    }
+    // Ø-Tempo
+    c.lineWidth = 1; c.setLineDash([2, 3]); c.strokeStyle = 'rgba(255,255,255,0.6)'; c.beginPath(); c.moveTo(L, Y(r.avgSpeed) + 0.5); c.lineTo(L + w, Y(r.avgSpeed) + 0.5); c.stroke(); c.setLineDash([]);
+    c.textAlign = 'right'; c.fillStyle = '#fff'; c.fillText('Ø ' + r.avgSpeed.toFixed(1), L + w - 4, Y(r.avgSpeed) + (r.avgSpeed > vmax * 0.8 ? 9 : -7));
+    // Top-Marker
+    const tx = X((top + 0.5) * dt), ty = Y(v[top]);
+    c.fillStyle = '#fff'; c.shadowColor = '#ff2bd6'; c.shadowBlur = 10; c.beginPath(); c.arc(tx, ty, 3.5, 0, Math.PI * 2); c.fill(); c.shadowBlur = 0;
+    c.textAlign = tx > cw * 0.82 ? 'right' : 'left'; c.fillStyle = '#fff'; c.fillText('TOP ' + r.topSpeed.toFixed(1), tx + (tx > cw * 0.82 ? -7 : 7), Math.max(T + 6, ty - 8));
+    // Legende
+    let lx = L; const ly = ch - 9;
+    const leg = (col, txt, dash) => { c.strokeStyle = col; c.lineWidth = 2; c.setLineDash(dash || []); c.beginPath(); c.moveTo(lx, ly); c.lineTo(lx + 16, ly); c.stroke(); c.setLineDash([]); c.textAlign = 'left'; c.fillStyle = '#b9a8e6'; c.fillText(txt, lx + 21, ly); lx += 21 + c.measureText(txt).width + 16; };
+    leg('#19e6ff', 'TEMPO (M/S)');
+    if (od.some((x) => x)) { c.fillStyle = 'rgba(255,43,214,0.5)'; c.fillRect(lx, ly - 4, 16, 8); c.fillStyle = '#b9a8e6'; c.fillText('OVERDRIVE', lx + 21, ly); lx += 21 + c.measureText('OVERDRIVE').width + 16; }
+    if (r.compare && r.compare.v && r.compare.v.length > 2) leg('rgba(255,224,42,0.9)', r.newRecord ? 'ALTER REKORD-RUN' : 'REKORD-RUN', [4, 4]);
   }
 }
