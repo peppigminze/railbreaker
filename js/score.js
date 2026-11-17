@@ -7,6 +7,9 @@ import { Ribbon } from './vfx.js';
 const F = CONFIG.flow, SC = CONFIG.score, GH = CONFIG.ghost;
 const MAX_SAMPLES = GH.rate * GH.maxSeconds;
 const STRIDE = 5;
+const CURVE_DT = 0.5, CURVE_MAX = Math.ceil(GH.maxSeconds / CURVE_DT) + 2;   // Tempo-Kurve: ein Wert pro halbe Sekunde
+const BOARD_SIZE = 10;
+const HIGH_DEFAULT = { score: 0, speed: 0, wave: 0, avg: 0, combo: 0, kills: 0, grind: 0, fast: 0 };
 
 function toB64(u8) {
   let s = '';
@@ -25,7 +28,10 @@ export class ScoreSystem {
     this.rec = new Int16Array(MAX_SAMPLES * STRIDE);
     this.recScore = new Int32Array(GH.maxSeconds + 2);
     this.ghost = null;
-    this.high = Store.get('high', { score: 0, speed: 0, wave: 0 });
+    this.high = Object.assign({}, HIGH_DEFAULT, Store.get('high', {}));
+    this.board = Store.get('board', []);          // Top-10-Runs nach Punkten
+    this.bestCurve = Store.get('bestCurve', null); // Tempo-Kurve des besten Runs (für den Vergleich im Graphen)
+    this.curve = new Float32Array(CURVE_MAX); this.curveOd = new Uint8Array(CURVE_MAX);
     this.waveTimes = Store.get('waveTimes', {});
     this.reset('');
   }
@@ -49,6 +55,8 @@ export class ScoreSystem {
     this.combo = 0; this.comboT = 0; this.longestCombo = 0;
     this.kills = 0; this.topSpeed = 0; this.grindDist = 0; this.runTime = 0; this.bestRank = 0;
     this.multiCount = 0; this.multiT = 0; this.speedAcc = 0; this.highAcc = 0; this.grindAcc = 0;
+    this.dist = 0; this.fastTime = 0; this.avgSpeed = 0; this.highBeaten = false;
+    this.curveN = 0; this.cT = 0; this.cSum = 0; this.cOd = 0;
     this.recN = 0; this.recT = 0; this.recLast = [0, 0, 0]; this.recOrigin = [0, 0, 0];
     this.ghostDelta = null; this.newRecord = false;
     this.loadGhost(seedStr);
@@ -68,6 +76,7 @@ export class ScoreSystem {
     this.updateRank();
     const pts = Math.round(points * this.mult);
     this.score += pts;
+    if (!this.highBeaten && this.high.score > 0 && this.score > this.high.score) { this.highBeaten = true; g.onHighscoreBeaten(this.high.score); }
     if (label) {
       this.combo++; this.comboT = SC.comboWindow;
       if (this.combo > this.longestCombo) this.longestCombo = this.combo;
@@ -113,6 +122,15 @@ export class ScoreSystem {
     this.runTime += dt;
     const sp = pl.speed;
     if (sp > this.topSpeed) this.topSpeed = sp;
+    // Tempo-Statistik: Distanz, Ø-Tempo, Zeit im Speed-Bereich, Kurve für den Graphen
+    this.dist += sp * dt;
+    this.avgSpeed = this.runTime > 0 ? this.dist / this.runTime : 0;
+    if (sp > SC.speedBonusMin) this.fastTime += dt;
+    this.cT += dt; this.cSum += sp * dt; if (this.overdrive) this.cOd += dt;
+    if (this.cT >= CURVE_DT && this.curveN < CURVE_MAX) {
+      this.curve[this.curveN] = this.cSum / this.cT; this.curveOd[this.curveN] = this.cOd > this.cT * 0.5 ? 1 : 0; this.curveN++;
+      this.cT = 0; this.cSum = 0; this.cOd = 0;
+    }
     // Flow leert sich langsam – schnell, wenn man stehen bleibt
     if (this.overdrive) {
       this.odT -= dt;
@@ -232,14 +250,56 @@ export class ScoreSystem {
     return { best, old };
   }
 
+  // Note für den Run, aus den Punkten (Schwellen in config.js)
+  grade(score) {
+    let i = 0;
+    while (i < SC.grades.length && score >= SC.grades[i]) i++;
+    return i;   // 0..4 -> D C B A S
+  }
+
+  // Run abschliessen: Bestwerte, Top-10-Liste und Tempo-Kurve speichern. Liefert alles, was der Game-Over-Screen braucht.
   finalize(wave) {
-    this.newRecord = this.score > this.high.score;
-    const h = this.high;
-    if (this.newRecord) h.score = this.score;
-    if (this.topSpeed > h.speed) h.speed = Math.round(this.topSpeed * 10) / 10;
-    if (wave > h.wave) h.wave = wave;
+    const h = this.high, prev = Object.assign({}, h);
+    const fastPct = this.runTime > 0 ? Math.round(this.fastTime / this.runTime * 100) : 0;
+    const run = {
+      score: this.score, top: Math.round(this.topSpeed * 10) / 10, avg: Math.round(this.avgSpeed * 10) / 10, wave,
+      kills: this.kills, combo: this.longestCombo, grind: Math.round(this.grindDist), time: Math.round(this.runTime * 10) / 10,
+      rank: this.bestRank, fast: fastPct, seed: this.seedStr, date: Date.now(),
+    };
+    this.newRecord = this.score > h.score;
+    const pb = {
+      score: this.newRecord, speed: run.top > prev.speed, avg: run.avg > prev.avg, wave: wave > prev.wave,
+      combo: run.combo > prev.combo, kills: run.kills > prev.kills, grind: run.grind > prev.grind, fast: run.fast > prev.fast,
+    };
+    if (pb.score) h.score = run.score;
+    if (pb.speed) h.speed = run.top;
+    if (pb.avg) h.avg = run.avg;
+    if (pb.wave) h.wave = wave;
+    if (pb.combo) h.combo = run.combo;
+    if (pb.kills) h.kills = run.kills;
+    if (pb.grind) h.grind = run.grind;
+    if (pb.fast) h.fast = run.fast;
     Store.set('high', h);
+    // Top-10: nach Punkten sortiert, der aktuelle Run bleibt über 'cur' markierbar
+    let place = -1;
+    if (run.score > 0) {
+      this.board.push(run);
+      this.board.sort((a, b) => b.score - a.score || b.date - a.date);
+      place = this.board.indexOf(run);
+      if (this.board.length > BOARD_SIZE) this.board.length = BOARD_SIZE;
+      if (place >= BOARD_SIZE) place = -1;
+      Store.set('board', this.board);
+    }
+    // Tempo-Kurve: eigene (aktuelle) Kurve für den Graphen, Rekord-Kurve zum Vergleich
+    const n = this.curveN;
+    const cur = Array.from(this.curve.subarray(0, n), (v) => Math.round(v * 10) / 10);
+    const od = Array.from(this.curveOd.subarray(0, n));
+    const compare = this.bestCurve;   // Kurve des Rekord-Runs von VOR diesem Run
+    if (this.newRecord && n > 4) {
+      this.bestCurve = { step: CURVE_DT * 4, v: cur.filter((_, i) => i % 4 === 0).map((v) => Math.round(v)) };
+      Store.set('bestCurve', this.bestCurve);
+    }
     this.saveGhost();
-    return this.newRecord;
+    return { run, prev, pb, place, board: this.board, newRecord: this.newRecord, grade: this.grade(this.score), curve: { dt: CURVE_DT, v: cur, od }, compare };
   }
 }

@@ -85,6 +85,7 @@ export const CONFIG = {
     kill: 100, airKill: 0.5, grindKill: 0.75, pierceKill: 200, multiKill: 60, multiWindow: 1.2,
     grindPerMeter: 2, railHop: 50, wallChain: 30, closeCall: 75, perfectDismount: 150,
     speedPerSec: 25, speedBonusMin: 30, highLinePerSec: 15, comboWindow: 3.5,
+    grades: [3000, 10000, 25000, 60000],   // Punkte-Schwellen für die Run-Note C, B, A, S (darunter: D)
   },
   audio: { bpm: 128, lookahead: 0.2 },
   ghost: { rate: 20, maxSeconds: 900 },
